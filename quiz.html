@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quiz</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --text:#1d2433; --muted:#5d667a; --line:#d6dae3; --accent:#1f5eff; --ok:#17803d; --bad:#b42318; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14171f; --card:#1d222d; --text:#eceff5; --muted:#9aa3b5; --line:#343b4b; --accent:#6c93ff; --ok:#4cc27a; --bad:#ff7b72; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:17px/1.5 system-ui, "Segoe UI", sans-serif; }
+  main { max-width:680px; margin:0 auto; padding:32px 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:28px; }
+  h1 { font-size:1.6rem; margin:0 0 8px; }
+  h2 { font-size:1.2rem; margin:0 0 20px; line-height:1.4; }
+  p { margin:0 0 16px; color:var(--muted); }
+  label.opt { display:flex; gap:12px; align-items:flex-start; padding:12px 14px; margin-bottom:10px; border:1px solid var(--line); border-radius:8px; cursor:pointer; color:var(--text); }
+  label.opt:hover { border-color:var(--accent); }
+  label.opt:has(input:checked) { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, transparent); }
+  input[type=text] { width:100%; padding:11px 12px; font:inherit; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--text); margin-bottom:16px; }
+  button { font:inherit; font-weight:600; padding:11px 22px; border:0; border-radius:8px; background:var(--accent); color:#fff; cursor:pointer; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  button.second { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+  :focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
+  .bar { height:6px; background:var(--line); border-radius:3px; margin-bottom:22px; overflow:hidden; }
+  .bar div { height:100%; background:var(--accent); width:0; transition:width .2s; }
+  .count { font-size:.9rem; color:var(--muted); margin-bottom:8px; }
+  .score { font-size:2.4rem; font-weight:700; margin:0 0 4px; }
+  .pass { color:var(--ok); } .fail { color:var(--bad); }
+  .row { display:flex; gap:10px; flex-wrap:wrap; margin-top:8px; }
+  .error { background:#fde8e6; color:#8a1c12; padding:16px; border-radius:8px; }
+</style>
+</head>
+<body>
+<main><div class="card" id="app"></div></main>
+
+<!-- Die Fragen liegen in der separaten Datei fragen.js (im selben Ordner) -->
+<script src="fragen.js"></script>
+<script>
+const app = document.getElementById("app");
+const el = (html) => { app.innerHTML = html; };
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+let questions = [], index = 0, correct = 0, teilnehmer = "";
+
+if (typeof QUIZ === "undefined" || !QUIZ.fragen || !QUIZ.fragen.length) {
+  el('<div class="error"><strong>Fragen nicht gefunden.</strong><br>Die Datei <code>fragen.js</code> muss im selben Ordner wie <code>quiz.html</code> liegen und Fragen enthalten.</div>');
+} else {
+  document.title = QUIZ.titel || "Quiz";
+  showStart();
+}
+
+function shuffle(a) {
+  a = a.slice();
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+function showStart() {
+  const grenze = QUIZ.bestehensgrenzeProzent ?? 80;
+  el(`
+    <h1>${esc(QUIZ.titel || "Quiz")}</h1>
+    <p>${QUIZ.fragen.length} Fragen. Zum Bestehen sind mindestens ${grenze} % richtige Antworten nötig.</p>
+    <label for="name">Ihr Name</label>
+    <input type="text" id="name" autocomplete="name" value="${esc(teilnehmer)}">
+    <button id="start" disabled>Quiz starten</button>`);
+  const name = document.getElementById("name"), start = document.getElementById("start");
+  name.addEventListener("input", () => { start.disabled = !name.value.trim(); });
+  start.disabled = !name.value.trim();
+  start.addEventListener("click", () => { teilnehmer = name.value.trim(); startQuiz(); });
+  name.focus();
+}
+
+function startQuiz() {
+  // Antworten pro Frage mischen (richtige Antwort wird mitgeführt)
+  questions = QUIZ.fragen.map(f => ({
+    frage: f.frage,
+    antworten: shuffle(f.antworten.map((text, i) => ({ text, richtig: i === f.richtig })))
+  }));
+  if (QUIZ.zufaelligeReihenfolge !== false) questions = shuffle(questions);
+  index = 0; correct = 0;
+  showQuestion();
+}
+
+function showQuestion() {
+  const q = questions[index];
+  el(`
+    <div class="count">Frage ${index + 1} von ${questions.length}</div>
+    <div class="bar"><div style="width:${(index / questions.length) * 100}%"></div></div>
+    <h2>${esc(q.frage)}</h2>
+    <form id="f">
+      ${q.antworten.map((a, i) => `<label class="opt"><input type="radio" name="a" value="${i}"><span>${esc(a.text)}</span></label>`).join("")}
+    </form>
+    <button id="next" disabled>${index + 1 === questions.length ? "Auswerten" : "Weiter"}</button>`);
+  const next = document.getElementById("next");
+  document.getElementById("f").addEventListener("change", () => { next.disabled = false; });
+  next.addEventListener("click", () => {
+    const val = document.querySelector('input[name="a"]:checked');
+    if (!val) return;
+    if (q.antworten[+val.value].richtig) correct++;
+    index++;
+    index < questions.length ? showQuestion() : showResult();
+  });
+}
+
+function showResult() {
+  const total = questions.length;
+  const prozent = Math.round((correct / total) * 100);
+  const grenze = QUIZ.bestehensgrenzeProzent ?? 80;
+  const bestanden = prozent >= grenze;
+  el(`
+    <p class="score ${bestanden ? "pass" : "fail"}">${bestanden ? "Bestanden" : "Nicht bestanden"}</p>
+    <p>${correct} von ${total} richtig (${prozent} %). Erforderlich: ${grenze} %.</p>
+    <div class="row">
+      ${bestanden ? '<button id="dl">Nachweis herunterladen</button>' : ""}
+      <button id="again" class="${bestanden ? "second" : ""}">${bestanden ? "Zurück zum Start" : "Erneut versuchen"}</button>
+    </div>`);
+  if (bestanden) {
+    document.getElementById("dl").addEventListener("click", () => downloadNachweis(prozent));
+  }
+  document.getElementById("again").addEventListener("click", () => bestanden ? (teilnehmer = "", showStart()) : startQuiz());
+}
+
+// --- Minimaler PDF-Erzeuger (ohne Fremdbibliothek, funktioniert offline) ---
+function pdfText(s) {
+  return String(s).replace(/[^\x00-\xFF]/g, "?").replace(/([\\()])/g, "\\$1");
+}
+
+function erzeugePdf(items) {
+  let c = "2 w 40 40 515 762 re S\n";
+  for (const t of items) {
+    c += "BT /" + (t.bold ? "F2" : "F1") + " " + t.size + " Tf " + (t.color || "0 0 0") +
+         " rg " + t.x + " " + t.y + " Td (" + pdfText(t.text) + ") Tj ET\n";
+  }
+  const objs = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 4 0 R >>",
+    "<< /Length " + c.length + " >>\nstream\n" + c + "endstream",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>"
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offs = [];
+  objs.forEach((o, i) => { offs.push(pdf.length); pdf += (i + 1) + " 0 obj\n" + o + "\nendobj\n"; });
+  const xref = pdf.length;
+  pdf += "xref\n0 " + (objs.length + 1) + "\n0000000000 65535 f \n" +
+         offs.map(o => String(o).padStart(10, "0") + " 00000 n \n").join("") +
+         "trailer\n<< /Size " + (objs.length + 1) + " /Root 1 0 R >>\nstartxref\n" + xref + "\n%%EOF";
+  return Uint8Array.from(pdf, ch => ch.charCodeAt(0));
+}
+
+function downloadNachweis(prozent) {
+  const jetzt = new Date();
+  const datum = jetzt.toLocaleDateString("de-DE") + ", " + jetzt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) + " Uhr";
+  const items = [
+    { x: 70, y: 730, size: 28, bold: true, text: "Nachweis" },
+    { x: 70, y: 695, size: 16, text: String(QUIZ.titel || "Quiz").slice(0, 70) },
+    { x: 70, y: 630, size: 24, bold: true, color: "0.09 0.5 0.24", text: "BESTANDEN" },
+    { x: 70, y: 570, size: 13, bold: true, text: "Name:" },
+    { x: 160, y: 570, size: 13, text: teilnehmer.slice(0, 60) },
+    { x: 70, y: 540, size: 13, bold: true, text: "Datum:" },
+    { x: 160, y: 540, size: 13, text: datum },
+    { x: 70, y: 510, size: 13, bold: true, text: "Ergebnis:" },
+    { x: 160, y: 510, size: 13, text: correct + " von " + questions.length + " richtig (" + prozent + " %)" }
+  ];
+  const blob = new Blob([erzeugePdf(items)], { type: "application/pdf" });
+  const a = document.createElement("a");
+  const safe = teilnehmer.replace(/[^\wäöüÄÖÜß-]+/g, "_");
+  a.href = URL.createObjectURL(blob);
+  a.download = "Nachweis_" + safe + "_" + jetzt.toISOString().slice(0, 10) + ".pdf";
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(a.href);
+}
+</script>
+</body>
+</html>
